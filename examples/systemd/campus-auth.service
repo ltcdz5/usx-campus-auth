@@ -1,0 +1,11 @@
+[Unit]
+Description=Campus portal auth (one shot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/etc/campus_auth.sh
+
+[Install]
+WantedBy=multi-user.target

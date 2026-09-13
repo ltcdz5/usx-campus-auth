@@ -1,0 +1,56 @@
+# ============================================================================
+# 绍兴大学（USX）校园网预置配置 —— Dr.COM eportal 4.x
+#
+#   用法（已刷 OpenWrt / ImmortalWrt 的路由器上）：
+#       cp presets/usx-drcom.conf.example /etc/campus_auth.conf
+#       chmod 600 /etc/campus_auth.conf
+#       vi /etc/campus_auth.conf      # 只改下面【只改这两行】那两行
+#       /etc/campus_auth.sh --show-config
+#       /etc/campus_auth.sh -v
+#
+#   ⚠️ 本文件不含任何真实账号，抄的是门户返回给浏览器的那条请求。
+#   ⚠️ 改完的 /etc/campus_auth.conf 里是【明文密码】：别提交、别截图发群。
+# ============================================================================
+
+# ---- 【只改这两行】--------------------------------------------------------
+USER_ACCOUNT="你的学号@telecom"     # @telecom = 中国电信；@cmcc = 移动。按你登录页选的那个写
+USER_PASSWORD="你的门户密码"
+# -------------------------------------------------------------------------
+
+# ---- 以下全部照本校门户抓包固化，正常情况下不用动 ------------------------
+SERVER="172.19.254.1"
+PORT="801"
+AUTH_PATH="/eportal/portal/login"
+AUTH_METHOD="GET"
+
+# 参数体。三个要点，改坏了门户直接拒：
+#   · user_account 里的 %2C0%2C 是本校固定的账号前缀（= ",0,"），别照别的学校改成 ,1, / ,3,
+#   · 看着没用的空字段（wlan_user_ipv6= / wlan_ac_name=）要留着，一个都别删
+#   · wlan_user_mac 固定全零是本校实测通过的写法，别改成真实 MAC
+AUTH_QUERY='callback=dr1003&login_method=1&user_account=%2C0%2C+USER+&user_password=+PASS+&wlan_user_ip=+IP+&wlan_user_ipv6=&wlan_user_mac=000000000000&wlan_ac_ip=172.19.254.18&wlan_ac_name=&jsVersion=4.2.1&terminal_type=1&lang=zh-cn&v=+TSMS+'
+
+# 本校宿舍网内网 IP 是 172.19.x.x
+IP_PREFIX="172.19."
+IFACE=""                    # 上面取不到 IP 时，用 `ip addr` 找到 WAN 网卡名填这里（优先级更高）
+
+# 抓包里的 Referer
+REFERER="http://172.19.254.1/"
+
+# ---- 在线探测：掉线了才发认证 --------------------------------------------
+# 必须 https（明文 http 未认证时也会被网关代答 200，判不出真假）
+PROBE_URL="https://www.baidu.com"
+PROBE_CA="strict"           # 别改 insecure：缺 CA 的正解是 apk add ca-certificates
+FAIL_THRESHOLD=3            # 连续 3 次探测不通才动手，防瞬时抖动
+
+# ---- 成功判定（只影响日志措辞，不影响会不会重发）--------------------------
+# 本校带凭据登录返回的是 HTML 成功页；无凭据/异常才返回 JSONP，所以两种形状都认
+SUCCESS_PATTERN='"result":[ ]*1[},]|"result":[ ]*"1"[},]|successlogin|已经成功登录'
+
+# ---- 其它 -----------------------------------------------------------------
+INTERVAL=60
+LOG_TAG="campus_auth"
+
+# ---- 换宿舍楼可能要动的一处 ----------------------------------------------
+# wlan_ac_ip=172.19.254.18 是抓包当时那台 AC（无线控制器）。
+# 如果 --show-config 的 URL 都对、门户却一直返回"参数错误"类响应，
+# 在浏览器 F12 里重抓一次登录请求，把新值抄进上面 AUTH_QUERY 的 wlan_ac_ip=。

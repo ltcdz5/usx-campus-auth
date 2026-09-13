@@ -1,0 +1,66 @@
+# ============================================================================
+# campus-portal-auth 配置示例
+#
+# 用法：
+#   cp campus_auth.conf.example /etc/campus_auth.conf
+#   chmod 600 /etc/campus_auth.conf        # 明文密码，别让其他用户读
+#   vi /etc/campus_auth.conf               # 按下面说明填
+#
+# 然后：
+#   /etc/campus_auth.sh --show-config      # 先看渲染出来的 URL 对不对（密码自动打码）
+#   /etc/campus_auth.sh -v                 # 真跑一次看响应
+#
+# ⚠️ 这个文件含明文密码，【不要】提交到 Git（.gitignore 已排除 *.conf）
+# ============================================================================
+
+# ---- 认证服务器（从浏览器 F12 抓到的请求 URL 里拆） ----
+# 例：http://172.19.254.1:801/eportal/portal/login?callback=dr1003&...
+#       主机 172.19.254.1  → SERVER
+#       端口 801           → PORT（URL 里没有 :端口 就留空）
+#       路径 /eportal/portal/login → AUTH_PATH
+# 注：认证请求固定按 http 发出（门户一般是内网 HTTP）。学校那条登录请求若是
+#     https，需要改 campus_auth.sh 里 do_login 拼 host 的那两行。
+SERVER="172.19.254.1"
+PORT="801"
+AUTH_PATH="/eportal/portal/login"
+
+# ---- 请求方式：GET 还是 POST（看抓包里 Request Method）----
+AUTH_METHOD="GET"
+
+# ---- 参数体（URL 里 "?" 后面的全部内容）----
+# 把账号 / 密码 / IP / 时间戳这几个值换成占位符，其余字段【一个都别动】，
+# 包括看起来没用的空字段（&wlan_user_ipv6=& 这种也要留着）。
+#
+# 占位符：+USER+ 账号  +PASS+ 密码  +IP+ 当前内网 IP
+#         +MAC+ 出口网卡 MAC  +TS+ 秒级时间戳  +TSMS+ 毫秒时间戳
+#
+# 值会自动做 URL 编码，所以这里写明文即可（@ 会变 %40，逗号变 %2C）。
+AUTH_QUERY='callback=dr1003&login_method=1&user_account=%2C0%2C+USER+&user_password=+PASS+&wlan_user_ip=+IP+&wlan_user_ipv6=&wlan_user_mac=+MAC+&wlan_ac_ip=&wlan_ac_name=&jsVersion=4.2.1&terminal_type=1&lang=zh-cn&v=+TSMS+'
+
+# ---- 账号密码（明文，脚本负责编码）----
+USER_ACCOUNT="你的学号@telecom"
+USER_PASSWORD="你的密码"
+
+# ---- 内网 IP 怎么挑（二选一，都填则以 IFACE 优先）----
+# 方式一：网段前缀。你的校园网 IP 是 172.19.x.x 就填 "172.19."
+IP_PREFIX="172.19."
+# 方式二：直接指定网卡（OpenWrt 上 WAN 可能是 eth1 / wan，用 `ip addr` 看）
+IFACE=""
+
+# ---- 可选：Referer 头（抓包里那个请求的 Referer 原样抄，没有就留空）----
+REFERER="http://172.19.254.1/"
+
+# ---- 在线探测（未认证时 https 会被劫持/超时，拿不到 200）----
+PROBE_URL="https://www.baidu.com"
+PROBE_CA="strict"        # strict（默认，推荐）| auto | insecure
+FAIL_THRESHOLD=3         # 连续几次探测不通才认定真断线（去抖）
+
+# ---- 成功判定（正则，匹配响应体）----
+# 默认值覆盖 Dr.COM eportal 两种响应形状（HTML 成功页 + JSONP result:1）。
+# 别的门户如果匹配不上，用 -v 看真实响应后自己加锚点。
+# ⚠️ 中文锚点要带"已经"，别只写"成功登录"——"尚未/没有/未成功登录"都含后者，会误判。
+SUCCESS_PATTERN='"result":[ ]*1[},]|"result":[ ]*"1"[},]|successlogin|已经成功登录'
+
+# ---- 其它 ----
+INTERVAL=60              # -d 常驻模式的探测间隔（秒）
+LOG_TAG="campus_auth"    # syslog 标签，logread | grep campus_auth 能查到

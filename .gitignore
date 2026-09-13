@@ -1,0 +1,12 @@
+# 填了真实账号密码的配置文件 —— 绝不提交
+campus_auth.conf
+*.conf
+!*.conf.example
+
+# 本地测试产物
+/tmp/
+.local-test/
+
+.DS_Store
+Thumbs.db
+*.swp
