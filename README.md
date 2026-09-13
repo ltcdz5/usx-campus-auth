@@ -1,9 +1,12 @@
 # usx-campus-auth
 
-绍兴大学校园网自动认证脚本：路由器自己保持门户登录，宿舍里所有设备共享一个名额。
-掉线后最迟 5 分钟内自动补上一次登录，不需要人管。
+**绍兴大学校园网自动认证脚本 —— 跑在刷了 OpenWrt / ImmortalWrt 的路由器上。**
+不是电脑或手机上的软件，也**不是 LuCI 插件**（没有网页界面）：两个文件放进路由器 `/etc/`、挂一条 cron 就完事。
 
-**不是 LuCI 插件**，没有网页界面 —— 两个文件放进 `/etc/`、挂一条 cron 就完事。
+效果：路由器自己保持校园网门户登录，宿舍里所有设备共享一个名额；掉线后最迟 5 分钟自动补一次登录，不需要人管。
+
+> **先确认你符合这一条**：路由器已经刷好 OpenWrt / ImmortalWrt（`apk` 或 `opkg` 能装包），
+> 并且宿舍那根校园网线插在它的 **WAN 口**。没刷机请先去刷机——本仓库不涉及刷机和救砖。
 
 ---
 
@@ -25,7 +28,19 @@ scp campus_auth.sh root@192.168.10.1:/etc/campus_auth.sh
 scp presets/usx-drcom.conf.example root@192.168.10.1:/etc/campus_auth.conf
 ```
 
-**【终端】SSH 进路由器后：**
+> `192.168.10.1` 换成**你自己路由器的管理地址**（OpenWrt 默认多为 `192.168.1.1`）。
+> 不知道就电脑上按 `Win` → 输入 `cmd` 回车 → `ipconfig` → 看"默认网关"那一行。
+> 后面所有出现 `192.168.10.1` 的地方同理。
+
+**【终端】SSH 进路由器**（电脑上按 `Win` → 输入 `powershell` 回车，然后）：
+
+```
+ssh root@192.168.10.1
+```
+
+第一次会问 `Are you sure you want to continue connecting` → 输 `yes` 回车；
+再问密码就**直接回车**（默认 root 无密码），或输你设过的 root 密码。
+看到提示符变成 `root@OpenWrt:~#` 就说明已经在路由器里了，下面这些命令都粘到这个窗口：
 
 ```sh
 apk add curl ca-certificates
