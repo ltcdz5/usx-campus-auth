@@ -46,6 +46,18 @@ FAIL_THRESHOLD=3            # 连续 3 次探测不通才动手，防瞬时抖�
 # 本校带凭据登录返回的是 HTML 成功页；无凭据/异常才返回 JSONP，所以两种形状都认
 SUCCESS_PATTERN='"result":[ ]*1[},]|"result":[ ]*"1"[},]|successlogin|已经成功登录'
 
+# ---- v2：持久日志（建议保留）----------------------------------------------
+# syslog 重启即清空 → 掉线事故"重启后查不到"。设了它就有持久证据可追：
+#   tail -20 /etc/campus_auth.log
+LOG_FILE="/etc/campus_auth.log"
+LOG_MAX_BYTES=204800        # 超阈值轮转，留最后 500 行
+
+# ---- v2：captive portal 判据 + 6h 兜底强制认证（建议保留）----------------
+# captive 端点：未认证时会被门户 302 劫持；在线时固定返回 204 → 比 https 探针更直接
+CAPTIVE_URL="http://connect.rom.miui.com/generate_204"
+# 兜底：不管探针结果，每 6 小时也强制认证一次（幂等），兜住"探针误判→静默断网"
+FORCE_REAUTH_HOURS=6
+
 # ---- 其它 -----------------------------------------------------------------
 INTERVAL=60
 LOG_TAG="campus_auth"

@@ -26,6 +26,11 @@
 #   ./campus_auth.sh --print-cron    # 打印推荐的 crontab 行
 #   ./campus_auth.sh -h              # 帮助
 #
+# 排查（v2 新增的持久证据，出事后的第一现场）：
+#   tail -20 /etc/campus_auth.log    # 持久日志（重启不丢）——需在配置里设 LOG_FILE
+#   cat /tmp/campus_auth.state       # 当前在线状态 up/down
+#   rm -f /tmp/campus_auth.force     # 删掉即触发下一次运行的兜底强制认证（手动救急）
+#
 # 定时（以每 5 分钟为例，写入 /etc/crontabs/root）：
 #   0,5,10,15,20,25,30,35,40,45,50,55 * * * * /etc/campus_auth.sh >/dev/null 2>&1
 #
@@ -56,6 +61,26 @@ INTERVAL=60
 SUCCESS_PATTERN='"result":[ ]*1[},]|"result":[ ]*"1"[},]|successlogin|已经成功登录'
 LOG_TAG="campus_auth"
 
+# ---- v2 新增：持久证据 + 两道保险（默认值保守，可按需覆盖）----
+
+# 持久日志：额外写一份到文件，重启不丢。
+#   ⚠️ syslog / logread 在重启后会清空，出事后无法追溯（这正是加它的原因）。
+#   默认留空 = 只写 syslog。强烈建议在配置文件里设为 /etc/campus_auth.log
+LOG_FILE=""
+LOG_MAX_BYTES=204800   # 超过则轮转，只保留最后 500 行，防写满分区
+
+# captive portal 判据：未认证时门户会把明文 HTTP 302 到认证页；在线时该端点返回 204。
+#   与 https 探针是【或】关系（任一说在线即在线）。设空则退回只用 https 探针。
+#   ⚠️ 若该域名被去广告清单拦（解析成 0.0.0.0）会恒失败，此时仅退化为原逻辑，不影响正确性。
+CAPTIVE_URL="http://connect.rom.miui.com/generate_204"
+
+# 兜底强制认证：每 N 小时不看探针结果，直接认证一次（幂等：已在线时门户答"已经在线"）。
+#   目的：兜住"探针误判在线 → 静默断网"这种最坏情况，保证最多 N 小时自愈。
+#   设 0 = 关闭。手动救急：rm -f $FORCE_STAMP
+FORCE_REAUTH_HOURS=6
+FORCE_STAMP="/tmp/campus_auth.force"
+STATE_FILE="/tmp/campus_auth.state"   # 上次在线状态；仅在状态变化时写日志，避免刷屏
+
 # AUTH_QUERY 支持的占位符（运行时替换）：
 #   +USER+  账号（URL 编码后）
 #   +PASS+  密码（URL 编码后）
@@ -75,7 +100,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         -v|--verbose)   VERBOSE=1 ;;
         -d|--daemon)    DAEMON=1 ;;
-        -h|--help)      sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help)      sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -c|--conf)      shift; [ $# -gt 0 ] && CONF_FILE="$1" ;;
         --show-config)  SHOW_CONFIG=1; VERBOSE=1 ;;
         --print-cron)   echo "0,5,10,15,20,25,30,35,40,45,50,55 * * * * $(readlink -f "$0" 2>/dev/null || echo /etc/campus_auth.sh) >/dev/null 2>&1"; exit 0 ;;
@@ -92,7 +117,37 @@ log() {
     if command -v logger >/dev/null 2>&1; then
         logger -t "$LOG_TAG" "$1"
     fi
+    # v2：持久日志（配了 LOG_FILE 才写；重启不丢，事后可追溯）
+    if [ -n "$LOG_FILE" ]; then
+        printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG_FILE" 2>/dev/null
+        if [ -f "$LOG_FILE" ]; then
+            _sz=$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0)
+            if [ "$_sz" -gt "$LOG_MAX_BYTES" ] 2>/dev/null; then
+                tail -n 500 "$LOG_FILE" > "${LOG_FILE}.tmp" 2>/dev/null && mv "${LOG_FILE}.tmp" "$LOG_FILE"
+            fi
+        fi
+    fi
     [ "$VERBOSE" = "1" ] && echo "[${LOG_TAG}] $1"
+    return 0
+}
+
+# v2：captive portal 探针 —— 返回 0 表示「没被门户劫持」
+captive_probe() {
+    [ -n "$CAPTIVE_URL" ] || return 1
+    _c=$(curl -s -o /dev/null -w '%{http_code}' -m 8 "$CAPTIVE_URL" 2>/dev/null)
+    [ "$_c" = "204" ]
+}
+
+# v2：状态标记 —— 只在 up/down 发生变化时写日志，避免每 5 分钟刷屏
+mark_state() {
+    _prev=$(cat "$STATE_FILE" 2>/dev/null || echo "-")
+    [ "$_prev" = "$1" ] && return 0
+    if [ "$_prev" = "-" ]; then
+        log "首次运行：当前状态 = $1"
+    else
+        log "❗状态变化: ${_prev} → $1"
+    fi
+    echo "$1" > "$STATE_FILE" 2>/dev/null
     return 0
 }
 
@@ -237,6 +292,12 @@ https_probe() {
 }
 
 is_online() {
+    # ① v2：captive portal 判据 —— 拿到 204 说明没被门户劫持。
+    #    它专测"是否被认证页拦截"，不受"网关放行部分站点"这类假在线干扰。
+    if captive_probe; then
+        return 0
+    fi
+    # ② https 探针（原判据）：https + 证书校验，网关伪造不了
     https_probe
     [ "$PROBE_CODE" = "200" ]
 }
@@ -332,11 +393,29 @@ if [ "$SHOW_CONFIG" = "1" ]; then
 fi
 
 run_once() {
+    # v2：兜底强制认证 —— 距上次超过 FORCE_REAUTH_HOURS 小时，不看探针直接认证一次。
+    #   幂等（已在线时门户答"已经在线"）。无论成败都更新时间戳 —— 否则失败后会被
+    #   每 5 分钟高频重试，反而像"异常心跳"；失败后的重试交给下面的正常分支负责。
+    if [ "$FORCE_REAUTH_HOURS" -gt 0 ]; then
+        _now=$(date +%s)
+        _last=$(cat "$FORCE_STAMP" 2>/dev/null || echo 0)
+        case "$_last" in ''|*[!0-9]*) _last=0 ;; esac
+        if [ $((_now - _last)) -ge $((FORCE_REAUTH_HOURS * 3600)) ]; then
+            log "兜底：距上次强制认证已超 ${FORCE_REAUTH_HOURS}h → 不依赖探针，强制认证一次"
+            do_login
+            _rc=$?
+            echo "$_now" > "$FORCE_STAMP" 2>/dev/null
+            return $_rc
+        fi
+    fi
+
     if ! is_offline_confirmed; then
+        mark_state up
         [ "$VERBOSE" = "1" ] && log "在线，无需操作"
         return 0
     fi
-    log "连续 ${FAIL_THRESHOLD} 次探测不通，触发重认证"
+    log "❗连续 ${FAIL_THRESHOLD} 次探测不通 → 判定已断线，触发重认证"
+    mark_state down
     do_login
 }
 

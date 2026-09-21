@@ -61,6 +61,26 @@ FAIL_THRESHOLD=3         # 连续几次探测不通才认定真断线（去抖�
 # ⚠️ 中文锚点要带"已经"，别只写"成功登录"——"尚未/没有/未成功登录"都含后者，会误判。
 SUCCESS_PATTERN='"result":[ ]*1[},]|"result":[ ]*"1"[},]|successlogin|已经成功登录'
 
+# ---- v2：持久日志（强烈建议开启）----
+# 为什么需要：syslog / logread 在【重启后会清空】—— 而掉线事故往往是"重启后就查不到了"。
+# 设了它就有持久证据，事后能精确看到掉线时刻与脚本的反应：
+#   tail -20 /etc/campus_auth.log
+# 建议放 /etc/ 下（随 OpenWrt 配置备份保留）。留空 = 只写 syslog。
+LOG_FILE="/etc/campus_auth.log"
+LOG_MAX_BYTES=204800     # 超过则轮转：只保留最后 500 行，防写满分区
+
+# ---- v2：captive portal 判据（默认开启，与 https 探针是「或」关系）----
+# 未认证时门户会把明文 HTTP 302 到认证页；在线时该端点固定返回 204。
+# 它比 https 探针更直接（专测"是否被门户劫持"），且不受"网关放行部分站点"的假在线干扰。
+# 若你的网络访问不到该端点，留空即可自动退回原逻辑（只靠 https 探针）。
+CAPTIVE_URL="http://connect.rom.miui.com/generate_204"
+
+# ---- v2：兜底强制认证（默认 6 小时）----
+# 不管探针结果，到点就认证一次（幂等：已在线时门户答"已经在线"）。
+# 作用：兜住"探针误判在线 → 静默断网"这种最坏情况，保证最多 6 小时自愈。
+# 设 0 = 关闭。手动立刻触发一次：rm -f /tmp/campus_auth.force
+FORCE_REAUTH_HOURS=6
+
 # ---- 其它 ----
 INTERVAL=60              # -d 常驻模式的探测间隔（秒）
 LOG_TAG="campus_auth"    # syslog 标签，logread | grep campus_auth 能查到
