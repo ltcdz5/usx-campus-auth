@@ -106,8 +106,17 @@ echo '0,5,10,15,20,25,30,35,40,45,50,55 * * * * /etc/campus_auth.sh >/dev/null 2
 /etc/init.d/cron restart
 ```
 
-装完就该干什么干什么去，以后它自己管。想看看跑没跑：`logread | grep campus_auth`
-—— **没输出是好事**，说明一直在线，只有掉线重连那一刻才写日志。
+装完甩手，以后它自己管。想确认跑得好不好、掉线了怎么查（**都在路由器上敲**）：
+
+```sh
+tail -20 /etc/campus_auth.log    # 持久日志，重启也不丢（logread 重启会清空）
+cat /tmp/campus_auth.state       # 当前在线状态：up / down
+```
+
+- 用 [`presets/usx-drcom.conf.example`](presets/usx-drcom.conf.example) 的话，持久日志默认就开着（`LOG_FILE` 已设）；自己配的话把 `LOG_FILE` 设成这个路径。
+- 一直 `up`、日志里只有掉线那一下的记录 = 正常在干活。
+- 脚本每 6 小时还会**兜底强制认证一次**（幂等），专门防「探针误判——你以为还连着、其实已断网」。
+- 手动救急：`rm -f /tmp/campus_auth.force`（删掉它，下次 cron 就跑一次）。
 
 ---
 
